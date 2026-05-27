@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Skin Disease Diagnosis</title>
+<style>
+body {
+    font-family: Arial;
+    background: #f4f6f9;
+    padding: 40px;
+}
+.container {
+    max-width: 900px;
+    margin: auto;
+}
+.card {
+    background: white;
+    padding: 25px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+}
+h1 { text-align: center; }
+h2 { margin-top: 0; }
+textarea {
+    width: 100%;
+    height: 120px;
+    padding: 10px;
+    font-size: 16px;
+    box-sizing: border-box;
+}
+input[type=file] { margin-top: 10px; }
+button {
+    margin-top: 20px;
+    padding: 12px 24px;
+    border: none;
+    background: #2563eb;
+    color: white;
+    font-size: 16px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+button:hover { background: #1d4ed8; }
+.result-item { margin-bottom: 12px; }
+.prob { margin-left: 20px; color: #555; font-size: 14px; }
+.loading { color: #2563eb; font-weight: bold; }
+.desc-box {
+    background: #f0fdf4;
+    border-left: 4px solid #22c55e;
+    padding: 10px 15px;
+    border-radius: 6px;
+    color: #166534;
+    margin-top: 6px;
+}
+.conf-bar-wrap {
+    background: #e5e7eb;
+    border-radius: 99px;
+    height: 10px;
+    margin-top: 6px;
+    width: 100%;
+}
+.conf-bar {
+    height: 10px;
+    border-radius: 99px;
+    background: #2563eb;
+}
+.weight-row {
+    display: flex;
+    gap: 20px;
+    margin-top: 4px;
+}
+.weight-box {
+    background: #eff6ff;
+    border-radius: 8px;
+    padding: 8px 16px;
+    color: #1d4ed8;
+    font-size: 14px;
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+    <h1>🩺 AI Skin Disease Diagnosis</h1>
+
+    <div class="card">
+        <h2>Input</h2>
+        <textarea id="text" placeholder="Enter symptoms..."></textarea>
+        <input type="file" id="image" accept="image/*"/>
+        <br>
+        <button onclick="predict()">Predict</button>
+    </div>
+
+    <div id="loading"></div>
+    <div id="fusionResult"></div>
+    <div id="textResult"></div>
+    <div id="imageResult"></div>
+
+</div>
+<script>
+
+const API_URL = "http://127.0.0.1:8000/predict-combined"
+
+async function predict() {
+    const text = document.getElementById("text").value
+    const file = document.getElementById("image").files[0]
+
+    if (!text && !file) {
+        alert("Vui lòng nhập triệu chứng hoặc chọn ảnh!")
+        return
+    }
+
+    const formData = new FormData()
+    if (text) formData.append("text", text)
+    if (file) formData.append("image", file)
+
+    document.getElementById("loading").innerHTML = `<p class="loading">⏳ Processing...</p>`
+    document.getElementById("fusionResult").innerHTML = ""
+    document.getElementById("textResult").innerHTML = ""
+    document.getElementById("imageResult").innerHTML = ""
+
+    try {
+        const res = await fetch(API_URL, { method: "POST", body: formData })
+        const data = await res.json()
+        document.getElementById("loading").innerHTML = ""
+        renderResults(data)
+    } catch (err) {
+        document.getElementById("loading").innerHTML = ""
+        alert("API Error: " + err.message)
+    }
+}
+
+function confBar(conf) {
+    const pct = (conf * 100).toFixed(2)
+    return `
+        <div>${pct}%</div>
+        <div class="conf-bar-wrap">
+            <div class="conf-bar" style="width:${pct}%"></div>
+        </div>
+    `
+}
+
+function buildProbs(probabilities) {
+    if (!probabilities) return ""
+    return Object.entries(probabilities)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `<div class="prob">${k}: ${(v * 100).toFixed(2)}%</div>`)
+        .join("")
+}
+
+function buildCard(title, data, showWeights) {
+    return `
+    <div class="card">
+        <h2>${title}</h2>
+        <div class="result-item">
+            <b>Prediction:</b> ${data.prediction}
+        </div>
+        <div class="result-item">
+            <b>Confidence:</b>
+            ${confBar(data.confidence)}
+        </div>
+        ${showWeights && data.weights ? `
+        <div class="result-item">
+            <b>Weights:</b>
+            <div class="weight-row">
+                <div class="weight-box">📝 Text: ${(data.weights.text * 100).toFixed(2)}%</div>
+                <div class="weight-box">🖼️ Image: ${(data.weights.image * 100).toFixed(2)}%</div>
+            </div>
+        </div>` : ""}
+        <div class="result-item">
+            <b>Description:</b>
+            <div class="desc-box">${data.description || "Không có mô tả"}</div>
+        </div>
+        ${data.probabilities ? `
+        <div class="result-item">
+            <b>Probabilities:</b>
+            ${buildProbs(data.probabilities)}
+        </div>` : ""}
+    </div>`
+}
+
+function renderResults(data) {
+    const result = data.result
+    const mode = data.mode
+        || (result.weights ? "fusion"
+        : result.probabilities ? "text-only"
+        : "image-only")
+
+    if (mode === "fusion") {
+        document.getElementById("fusionResult").innerHTML =
+            buildCard("🔀 Fusion Result", result, true)
+    }
+
+    if (mode === "text-only") {
+        document.getElementById("textResult").innerHTML =
+            buildCard("📝 Text Model", result, false)
+    }
+
+    if (mode === "image-only") {
+        document.getElementById("imageResult").innerHTML =
+            buildCard("🖼️ Image Model", result, false)
+    }
+}
+
+</script>
+</body>
+</html>
